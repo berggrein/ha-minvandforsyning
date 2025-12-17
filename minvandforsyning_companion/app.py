@@ -19,6 +19,7 @@ STATE = {
     "raw": None,
 }
 
+
 def load_options():
     path = os.environ.get("ADDON_OPTIONS", "/data/options.json")
     try:
@@ -26,6 +27,7 @@ def load_options():
             return json.load(f)
     except Exception as e:
         raise RuntimeError(f"Kunne ikke læse options.json ({path}): {e}")
+
 
 def parse_dom_text(txt: str):
     txt = re.sub(r"\s+", " ", txt).strip()
@@ -49,13 +51,13 @@ def parse_dom_text(txt: str):
 
     return reading_m3, read_at_iso, txt
 
+
 def scrape_once(email: str, password: str):
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
 
         page.goto("https://www.minvandforsyning.dk/LoginIntermediate", wait_until="domcontentloaded")
-
         page.get_by_role("button", name="Fortsæt med Google/Microsoft/E-mail").click()
 
         page.wait_for_url(re.compile(r"^https://id\.ramboll\.com/"), timeout=60_000)
@@ -66,14 +68,9 @@ def scrape_once(email: str, password: str):
         page.wait_for_url(re.compile(r"^https://www\.minvandforsyning\.dk/"), timeout=60_000)
         page.goto("https://www.minvandforsyning.dk/forbrug", wait_until="domcontentloaded")
 
-        # Vent på at teksten findes i DOM (CSP-safe, ingen eval)
-        loc = page.locator("span.dynamicText", has_text="aflæst til").first
-        loc.wait_for(state="visible", timeout=60_000)
-
+        loc = page.locator("span.dynamicText").filter(has_text="aflæst til").first
+        loc.wait_for(timeout=60_000)
         txt = loc.inner_text()
-                .map(e => e.innerText || '')
-                .find(t => t.includes('aflæst til')) || ''"""
-        )
 
         browser.close()
 
@@ -92,6 +89,7 @@ def scrape_once(email: str, password: str):
         "raw": raw,
     }
 
+
 def poll_loop(email: str, password: str, poll_seconds: int):
     global STATE
     while True:
@@ -108,15 +106,18 @@ def poll_loop(email: str, password: str, poll_seconds: int):
             }
         time.sleep(max(60, int(poll_seconds)))
 
+
 @APP.get("/state")
 def get_state():
     if not STATE.get("ok"):
         raise HTTPException(status_code=503, detail=STATE)
     return STATE
 
+
 @APP.get("/state_raw")
 def get_state_raw():
     return STATE
+
 
 if __name__ == "__main__":
     opts = load_options()
