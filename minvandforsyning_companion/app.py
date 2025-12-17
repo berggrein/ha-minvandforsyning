@@ -66,14 +66,11 @@ def scrape_once(email: str, password: str):
         page.wait_for_url(re.compile(r"^https://www\.minvandforsyning\.dk/"), timeout=60_000)
         page.goto("https://www.minvandforsyning.dk/forbrug", wait_until="domcontentloaded")
 
-        page.wait_for_function(
-            """() => Array.from(document.querySelectorAll('span.dynamicText'))
-                .some(e => (e.innerText || '').includes('aflæst til'))""",
-            timeout=60_000,
-        )
+        # Vent på at teksten findes i DOM (CSP-safe, ingen eval)
+        loc = page.locator("span.dynamicText", has_text="aflæst til").first
+        loc.wait_for(state="visible", timeout=60_000)
 
-        txt = page.evaluate(
-            """() => Array.from(document.querySelectorAll('span.dynamicText'))
+        txt = loc.inner_text()
                 .map(e => e.innerText || '')
                 .find(t => t.includes('aflæst til')) || ''"""
         )
