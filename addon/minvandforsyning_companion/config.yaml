@@ -1,0 +1,23 @@
+name: "Minvandforsyning Companion"
+version: "0.1.0"
+slug: "minvandforsyning_companion"
+description: "Scraper minvandforsyning.dk via Playwright og udstiller JSON til HA"
+arch:
+  - amd64
+  - aarch64
+  - armv7
+startup: services
+boot: auto
+init: false
+ingress: false
+panel_icon: mdi:water
+ports:
+  8080/tcp: 8080
+options:
+  email: ""
+  password: ""
+  poll_seconds: 1800
+schema:
+  email: str
+  password: password
+  poll_seconds: int
