@@ -1,5 +1,5 @@
 name: "Minvandforsyning Companion"
-slug: "minvandforsyning"
+slug: "minvandforsyning_companion"
 version: "0.3.0"
 description: "Henter vandforbrug fra minvandforsyning.dk og eksponerer det til Home Assistant"
 arch:
