@@ -1,5 +1,5 @@
 name: "Minvandforsyning Companion"
-version: "0.2.0"
+version: "0.2.1"
 slug: "minvandforsyning_companion"
 description: "Logger ind på minvandforsyning.dk og udstiller seneste aflæsning via HTTP til Home Assistant"
 arch:
