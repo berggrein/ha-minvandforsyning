@@ -1,7 +1,7 @@
 name: "Minvandforsyning Companion"
-version: "0.2.6"
+version: "0.2.4"
 slug: "minvandforsyning_companion"
-description: "Scraper minvandforsyning.dk via Playwright og udstiller JSON til Home Assistant"
+description: "Scraper minvandforsyning.dk via Playwright og udstiller JSON til HA (inkl. stabil cache + adaptiv polling + UI)"
 arch:
   - amd64
   - aarch64
@@ -10,92 +10,51 @@ startup: services
 boot: auto
 init: false
 
-# No Ingress, clean add-on
+# UI in HA (Supervisor)
+ingress: true
+ingress_port: 8080
+ingress_entry: /ui
+panel_icon: mdi:water
+panel_title: "Minvandforsyning"
+
+# Optional direct access without ingress
 ports:
   8080/tcp: 8080
+webui: "http://[HOST]:[PORT:8080]/ui"
 
 options:
   # Login
   email: ""
   password: ""
 
+
   # Polling (adaptive)
-  idle_poll_seconds: 1800
-  probe_after_minutes: 45
-  probe_poll_seconds: 120
-  probe_max_minutes: 20
-  min_poll_seconds: 30
-  jitter_seconds: 15
+  idle_poll_seconds: 1800          # how often when fresh data is expected NOT to arrive yet
+  probe_after_minutes: 45          # after new data, wait this long before probing more often
+  probe_poll_seconds: 120          # polling interval during probe window
+  probe_max_minutes: 20            # max time to stay in probe mode before going back to idle
+  min_poll_seconds: 30             # hard minimum interval (safety)
+  jitter_seconds: 15               # random jitter to avoid hammering
 
   # Stability
-  keep_last_on_error: true
-  allow_decrease: false
-  decrease_tolerance_m3: 0.0005
+  keep_last_on_error: true         # keep last good value if scrape fails
+  allow_decrease: false            # normally total should never go down
+  decrease_tolerance_m3: 0.0005    # tolerate tiny rounding wobble (m³)
 
 schema:
-  email:
-    name: Login email
-    description: >
-      Email til en eksisterende bruger på minvandforsyning.dk.
-      Begrænsning: Add-on er kun testet med én bruger der har præcis én tilknyttet måler.
-    required: true
+  # Login
+  email: str
+  password: password
 
-  password:
-    name: Login adgangskode
-    description: Adgangskode til minvandforsyning.dk
-    type: password
-    required: true
+  # Polling (adaptive)
+  idle_poll_seconds: int(30,)
+  probe_after_minutes: int(1,)
+  probe_poll_seconds: int(30,)
+  probe_max_minutes: int(1,)
+  min_poll_seconds: int(10,)
+  jitter_seconds: int(0,)
 
-  idle_poll_seconds:
-    name: Normal opdateringsinterval (sekunder)
-    description: >
-      Hvor ofte der polles, når der ikke forventes ny data endnu.
-    type: int
-
-  probe_after_minutes:
-    name: Start hyppig polling efter (minutter)
-    description: >
-      Tid efter sidste nye aflæsning før der tjekkes oftere.
-    type: int
-
-  probe_poll_seconds:
-    name: Hyppig polling interval (sekunder)
-    description: >
-      Hvor ofte der polles i hyppig tilstand.
-    type: int
-
-  probe_max_minutes:
-    name: Maks hyppig polling periode (minutter)
-    description: >
-      Hvor længe hyppig polling må køre før der faldes tilbage til normal polling.
-    type: int
-
-  min_poll_seconds:
-    name: Minimum poll interval (sekunder)
-    description: >
-      Sikkerhedsgrænse så der aldrig polles hurtigere end dette.
-    type: int
-
-  jitter_seconds:
-    name: Tilfældig forsinkelse (sekunder)
-    description: >
-      Tilføjer variation så polling ikke ligger på præcise faste tidspunkter.
-    type: int
-
-  keep_last_on_error:
-    name: Behold seneste værdi ved fejl
-    description: >
-      Returnér seneste kendte målerstand selv hvis scraping fejler midlertidigt.
-    type: bool
-
-  allow_decrease:
-    name: Tillad faldende total (ikke anbefalet)
-    description: >
-      Vandmåleren bør normalt aldrig gå baglæns.
-    type: bool
-
-  decrease_tolerance_m3:
-    name: Tolerance for fald (m3)
-    description: >
-      Lille tolerance for afrundingsfejl når fald er tilladt.
-    type: float
+  # Stability
+  keep_last_on_error: bool
+  allow_decrease: bool
+  decrease_tolerance_m3: float
