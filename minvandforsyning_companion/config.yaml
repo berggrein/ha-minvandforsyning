@@ -1,11 +1,11 @@
 name: "Minvandforsyning Companion"
 slug: "minvandforsyning"
 version: "0.3.0"
-description: Henter vandforbrug fra minvandforsyning.dk og eksponerer det til Home Assistant
+description: "Henter vandforbrug fra minvandforsyning.dk og eksponerer det til Home Assistant"
 arch:
   - amd64
   - aarch64
-startup: application
+startup: services
 boot: auto
 ingress: false
 
