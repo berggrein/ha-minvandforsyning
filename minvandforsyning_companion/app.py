@@ -567,6 +567,22 @@ def _render_scraper(opts: dict[str, Any], overrides: dict[str, Any]) -> str:
 """
 
 
+
+# -----------------------------------------------------------------------------
+# Ingress helpers
+# -----------------------------------------------------------------------------
+
+@APP.get("/", include_in_schema=False)
+def root_redirect():
+    # HA ingress often lands on "/" first. Redirect to the UI.
+    return RedirectResponse(url="/ui", status_code=302)
+
+
+@APP.get("/ui/", response_class=HTMLResponse, include_in_schema=False)
+def ui_slash(request: Request):
+    # Accept trailing slash too
+    return ui(request)
+
 @APP.get("/ui", response_class=HTMLResponse)
 def ui(request: Request):
     tab = (request.query_params.get("tab") or "info").strip().lower()
