@@ -1,0 +1,31 @@
+configuration:
+  email:
+    name: E-mail
+    description: E-mailen du bruger til at logge ind på minvandforsyning.dk
+  password:
+    name: Adgangskode
+    description: Adgangskoden du bruger til at logge ind på minvandforsyning.dk
+
+  idle_poll_seconds:
+    name: Idle poll interval
+    description: Hvor ofte der tjekkes, mens der ikke forventes ny data. Default er 1800 sekunder (30 minutter).
+
+  probe_after_minutes:
+    name: Start probe efter (minutter)
+    description: Antal minutter efter seneste nye data, før add-on'en begynder at polle oftere i en kort periode. Default er 45.
+
+  probe_poll_seconds:
+    name: Probe poll interval (sekunder)
+    description: Hvor ofte der tjekkes i probe-perioden, når ny data forventes. Default er 120 sekunder.
+
+  probe_max_minutes:
+    name: Probe varighed (minutter)
+    description: Hvor længe der polls oftere, før der skiftes tilbage til idle. Default er 20.
+
+  min_poll_seconds:
+    name: Minimum poll interval (sekunder)
+    description: Et sikkerhedsloft så der aldrig polls for aggressivt, selv hvis du sætter små værdier. Default er 30.
+
+  jitter_seconds:
+    name: Jitter (sekunder)
+    description: Lægger 0 til N sekunder tilfældigt oveni hvert sleep, så requests ikke rammer præcis samme sekund. Default er 15.

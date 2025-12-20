@@ -1,7 +1,7 @@
 name: "Minvandforsyning Companion"
-version: "0.1.3"
+version: "0.2.0"
 slug: "minvandforsyning_companion"
-description: "Scraper minvandforsyning.dk via Playwright og udstiller JSON til HA"
+description: "Logger ind på minvandforsyning.dk og udstiller seneste aflæsning via HTTP til Home Assistant"
 arch:
   - amd64
   - aarch64
@@ -13,11 +13,25 @@ ingress: false
 panel_icon: mdi:water
 ports:
   8080/tcp: 8080
+
 options:
   email: ""
   password: ""
-  poll_seconds: 1800
+  idle_poll_seconds: 1800
+  probe_after_minutes: 45
+  probe_poll_seconds: 120
+  probe_max_minutes: 20
+  min_poll_seconds: 30
+  jitter_seconds: 15
+
 schema:
   email: str
   password: password
-  poll_seconds: int
+  idle_poll_seconds: int
+  probe_after_minutes: int
+  probe_poll_seconds: int
+  probe_max_minutes: int
+  min_poll_seconds: int
+  jitter_seconds: int
+
+# Translations are in translations/da.yaml and translations/en.yaml

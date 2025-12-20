@@ -1,0 +1,31 @@
+configuration:
+  email:
+    name: Email
+    description: The email you use to sign in to minvandforsyning.dk
+  password:
+    name: Password
+    description: The password you use to sign in to minvandforsyning.dk
+
+  idle_poll_seconds:
+    name: Idle poll interval
+    description: How often to check while not expecting new data. Default is 1800 seconds (30 minutes).
+
+  probe_after_minutes:
+    name: Start probing after (minutes)
+    description: Minutes since last new data before switching to a short high frequency probe window. Default is 45.
+
+  probe_poll_seconds:
+    name: Probe poll interval (seconds)
+    description: How often to check during the probe window when new data is expected. Default is 120 seconds.
+
+  probe_max_minutes:
+    name: Probe window length (minutes)
+    description: How long to keep probing before going back to idle polling. Default is 20.
+
+  min_poll_seconds:
+    name: Minimum poll interval (seconds)
+    description: Safety floor so the add-on never polls too aggressively even if you configure very small values. Default is 30.
+
+  jitter_seconds:
+    name: Jitter (seconds)
+    description: Adds 0 to N random seconds to each sleep so multiple installs do not hit the site at the exact same second. Default is 15.
