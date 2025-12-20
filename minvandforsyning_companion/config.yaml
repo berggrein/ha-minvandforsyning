@@ -1,7 +1,7 @@
 name: "Minvandforsyning Companion"
-version: "0.2.1"
+version: "0.2.2"
 slug: "minvandforsyning_companion"
-description: "Logger ind på minvandforsyning.dk og udstiller seneste aflæsning via HTTP til Home Assistant"
+description: "Scraper minvandforsyning.dk via Playwright og udstiller JSON til HA (inkl. stabil cache + adaptiv polling + UI)"
 arch:
   - amd64
   - aarch64
@@ -9,29 +9,51 @@ arch:
 startup: services
 boot: auto
 init: false
-ingress: false
+
+# UI in HA (Supervisor)
+ingress: true
+ingress_port: 8080
+ingress_entry: /ui
 panel_icon: mdi:water
+panel_title: "Minvandforsyning"
+
+# Optional direct access without ingress
 ports:
   8080/tcp: 8080
+webui: "http://[HOST]:[PORT:8080]/ui"
 
 options:
+  # Login
   email: ""
   password: ""
-  idle_poll_seconds: 1800
-  probe_after_minutes: 45
-  probe_poll_seconds: 120
-  probe_max_minutes: 20
-  min_poll_seconds: 30
-  jitter_seconds: 15
+
+  # Polling (adaptive)
+  idle_poll_seconds: 1800          # how often when fresh data is expected NOT to arrive yet
+  probe_after_minutes: 45          # after new data, wait this long before probing more often
+  probe_poll_seconds: 120          # polling interval during probe window
+  probe_max_minutes: 20            # max time to stay in probe mode before going back to idle
+  min_poll_seconds: 30             # hard minimum interval (safety)
+  jitter_seconds: 15               # random jitter to avoid hammering
+
+  # Stability
+  keep_last_on_error: true         # keep last good value if scrape fails
+  allow_decrease: false            # normally total should never go down
+  decrease_tolerance_m3: 0.0005    # tolerate tiny rounding wobble (m³)
 
 schema:
+  # Login
   email: str
   password: password
-  idle_poll_seconds: int
-  probe_after_minutes: int
-  probe_poll_seconds: int
-  probe_max_minutes: int
-  min_poll_seconds: int
-  jitter_seconds: int
 
-# Translations are in translations/da.yaml and translations/en.yaml
+  # Polling (adaptive)
+  idle_poll_seconds: int(30,)
+  probe_after_minutes: int(1,)
+  probe_poll_seconds: int(30,)
+  probe_max_minutes: int(1,)
+  min_poll_seconds: int(10,)
+  jitter_seconds: int(0,)
+
+  # Stability
+  keep_last_on_error: bool
+  allow_decrease: bool
+  decrease_tolerance_m3: float
