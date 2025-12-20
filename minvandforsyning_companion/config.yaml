@@ -1,5 +1,5 @@
 name: "Minvandforsyning Companion"
-version: "0.2.7"
+version: "0.2.8"
 slug: "minvandforsyning_companion"
 description: "Scraper minvandforsyning.dk via Playwright og udstiller JSON til Home Assistant (stabil cache + adaptiv polling)"
 arch:

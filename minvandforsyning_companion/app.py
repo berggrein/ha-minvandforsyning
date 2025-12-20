@@ -3,11 +3,28 @@ import re
 import threading
 import time
 import random
+import logging
 from datetime import datetime, timezone
 from typing import Optional, Tuple
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from playwright.sync_api import sync_playwright
+
+# -----------------------------------------------------------------------------
+# Logging (timestamped, UTC)
+# -----------------------------------------------------------------------------
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+def log(component: str, mode: str, message: str):
+    logging.info(f"{utc_now()} | {component} | {mode} | {message}")
+
+# -----------------------------------------------------------------------------
+# App + State
+# -----------------------------------------------------------------------------
 
 APP = FastAPI()
 
@@ -19,13 +36,12 @@ STATE = {
     "error": None,
 }
 
-LAST_GOOD = None
-LAST_CHANGE_TS = None
+LAST_GOOD: Optional[float] = None
+LAST_CHANGE_TS: Optional[float] = None
 
-
-def utc_now():
-    return datetime.now(timezone.utc).isoformat()
-
+# -----------------------------------------------------------------------------
+# Helpers
+# -----------------------------------------------------------------------------
 
 def load_options():
     with open("/data/options.json", "r", encoding="utf-8") as f:
@@ -53,12 +69,17 @@ def parse_text(txt: str) -> Tuple[Optional[float], Optional[str]]:
     return val, ts
 
 
-def scrape(email: str, password: str) -> Tuple[float, str]:
+def scrape(email: str, password: str) -> Tuple[Optional[float], Optional[str]]:
+    log("scraper", "start", "Starting browser scrape")
+
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
 
-        page.goto("https://www.minvandforsyning.dk/LoginIntermediate", wait_until="domcontentloaded")
+        page.goto(
+            "https://www.minvandforsyning.dk/LoginIntermediate",
+            wait_until="domcontentloaded",
+        )
         page.get_by_role("button", name="Fortsæt med Google/Microsoft/E-mail").click()
 
         page.wait_for_url(re.compile("id.ramboll.com"))
@@ -75,8 +96,12 @@ def scrape(email: str, password: str) -> Tuple[float, str]:
 
         browser.close()
 
+    log("scraper", "success", f"Raw text: {txt}")
     return parse_text(txt)
 
+# -----------------------------------------------------------------------------
+# Poll loop (adaptive, stable)
+# -----------------------------------------------------------------------------
 
 def poll_loop():
     global LAST_GOOD, LAST_CHANGE_TS
@@ -98,6 +123,8 @@ def poll_loop():
 
     probe_started = None
 
+    log("poll", "startup", "Poll loop started")
+
     while True:
         try:
             val, read_at = scrape(email, password)
@@ -106,10 +133,12 @@ def poll_loop():
                 if LAST_GOOD is None:
                     LAST_GOOD = val
                     LAST_CHANGE_TS = time.time()
+                    log("state", "init", f"Initial reading {val} m3")
                 else:
                     if allow_decrease or val >= LAST_GOOD - tol:
                         if val > LAST_GOOD:
                             LAST_CHANGE_TS = time.time()
+                            log("state", "update", f"New reading {val} m3")
                         LAST_GOOD = max(LAST_GOOD, val)
 
                 STATE.update(
@@ -123,6 +152,7 @@ def poll_loop():
                 )
 
         except Exception as e:
+            log("scraper", "error", str(e))
             STATE["error"] = str(e)
             STATE["scraped_at_utc"] = utc_now()
             if not keep_last:
@@ -134,23 +164,36 @@ def poll_loop():
         if in_probe:
             if probe_started is None:
                 probe_started = now
+                log("poll", "probe", "Entering probe mode")
             if (now - probe_started) > probe_max:
                 in_probe = False
                 probe_started = None
+                log("poll", "idle", "Leaving probe mode")
 
         base = probe_poll if in_probe else idle_poll
         sleep_for = base + random.randint(0, jitter)
+        log("poll", "sleep", f"Sleeping {sleep_for}s")
         time.sleep(max(10, sleep_for))
 
+# -----------------------------------------------------------------------------
+# API
+# -----------------------------------------------------------------------------
 
 @APP.get("/state")
 def get_state():
-    if STATE["reading_m3"] is None:
-        raise HTTPException(status_code=503, detail=STATE)
+    # Always 200 to keep HA stable
     return STATE
 
+@APP.get("/state_raw")
+def get_state_raw():
+    return STATE
+
+# -----------------------------------------------------------------------------
+# Entrypoint
+# -----------------------------------------------------------------------------
 
 if __name__ == "__main__":
+    log("app", "startup", "Minvandforsyning Companion starting")
     threading.Thread(target=poll_loop, daemon=True).start()
 
     import uvicorn
