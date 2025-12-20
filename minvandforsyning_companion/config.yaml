@@ -1,7 +1,7 @@
 name: "Minvandforsyning Companion"
-version: "0.2.6"
+version: "0.2.7"
 slug: "minvandforsyning_companion"
-description: "Scraper minvandforsyning.dk via Playwright og udstiller JSON til HA (inkl. stabil cache + adaptiv polling + UI)"
+description: "Scraper minvandforsyning.dk via Playwright og udstiller JSON til Home Assistant (stabil cache + adaptiv polling)"
 arch:
   - amd64
   - aarch64
@@ -10,7 +10,7 @@ startup: services
 boot: auto
 init: false
 
-# Optional direct access without ingress
+# Direct access (no ingress)
 ports:
   8080/tcp: 8080
 
@@ -19,32 +19,31 @@ options:
   email: ""
   password: ""
 
-
   # Polling (adaptive)
-  idle_poll_seconds: 1800          # how often when fresh data is expected NOT to arrive yet
-  probe_after_minutes: 45          # after new data, wait this long before probing more often
-  probe_poll_seconds: 120          # polling interval during probe window
-  probe_max_minutes: 20            # max time to stay in probe mode before going back to idle
-  min_poll_seconds: 30             # hard minimum interval (safety)
-  jitter_seconds: 15               # random jitter to avoid hammering
+  idle_poll_seconds: 1800
+  probe_after_minutes: 45
+  probe_poll_seconds: 120
+  probe_max_minutes: 20
+  min_poll_seconds: 30
+  jitter_seconds: 15
 
   # Stability
-  keep_last_on_error: true         # keep last good value if scrape fails
-  allow_decrease: false            # normally total should never go down
-  decrease_tolerance_m3: 0.0005    # tolerate tiny rounding wobble (m³)
+  keep_last_on_error: true
+  allow_decrease: false
+  decrease_tolerance_m3: 0.0005
 
 schema:
   # Login
   email: str
   password: password
 
-  # Polling (adaptive)
-  idle_poll_seconds: int(30,)
-  probe_after_minutes: int(1,)
-  probe_poll_seconds: int(30,)
-  probe_max_minutes: int(1,)
-  min_poll_seconds: int(10,)
-  jitter_seconds: int(0,)
+  # Polling (adaptive) - valid int(min,max) syntax
+  idle_poll_seconds: int(30,86400)     # 30s .. 24h
+  probe_after_minutes: int(1,1440)     # 1m .. 24h
+  probe_poll_seconds: int(30,3600)     # 30s .. 1h
+  probe_max_minutes: int(1,240)        # 1m .. 4h
+  min_poll_seconds: int(10,3600)       # 10s .. 1h
+  jitter_seconds: int(0,300)           # 0s .. 5m
 
   # Stability
   keep_last_on_error: bool
