@@ -1,202 +1,260 @@
 import json
+import os
 import re
 import threading
 import time
-import random
-import logging
 from datetime import datetime, timezone
-from typing import Optional, Tuple
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from playwright.sync_api import sync_playwright
-
-# -----------------------------------------------------------------------------
-# Logging (timestamped, UTC)
-# -----------------------------------------------------------------------------
-
-def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
-
-logging.basicConfig(level=logging.INFO, format="%(message)s")
-
-def log(component: str, mode: str, message: str):
-    logging.info(f"{utc_now()} | {component} | {mode} | {message}")
-
-# -----------------------------------------------------------------------------
-# App + State
-# -----------------------------------------------------------------------------
 
 APP = FastAPI()
 
 STATE = {
     "ok": False,
+    "error": "Not scraped yet",
     "reading_m3": None,
     "read_at_iso": None,
     "scraped_at_utc": None,
-    "error": None,
+    "raw": None,
 }
 
-LAST_GOOD: Optional[float] = None
-LAST_CHANGE_TS: Optional[float] = None
 
-# -----------------------------------------------------------------------------
-# Helpers
-# -----------------------------------------------------------------------------
+def _now_utc_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _clamp_int(v: int, lo: int, hi: int) -> int:
+    return max(lo, min(hi, int(v)))
+
+
+def _sleep_with_jitter(base_seconds: int, jitter_seconds: int):
+    """Sleep base_seconds plus a small random jitter.
+
+    Jitter avoids many installations hitting the site at the exact same second.
+    """
+    if jitter_seconds <= 0:
+        time.sleep(base_seconds)
+        return
+
+    # No imports at top-level to keep startup fast.
+    import random
+
+    j = random.randint(0, int(jitter_seconds))
+    time.sleep(int(base_seconds) + j)
+
 
 def load_options():
-    with open("/data/options.json", "r", encoding="utf-8") as f:
-        return json.load(f)
+    path = os.environ.get("ADDON_OPTIONS", "/data/options.json")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        raise RuntimeError(f"Kunne ikke læse options.json ({path}): {e}")
 
 
-def parse_text(txt: str) -> Tuple[Optional[float], Optional[str]]:
-    val = None
-    ts = None
+def parse_dom_text(txt: str):
+    txt = re.sub(r"\s+", " ", txt).strip()
 
-    m_val = re.search(r"aflæst til:\s*([0-9]+,[0-9]+)", txt)
-    m_time = re.search(
-        r"kl\.\s*([0-9]{1,2}\.[0-9]{2}),\s*d\.\s*([0-9]{2}\.[0-9]{2}\.[0-9]{4})",
+    m_val = re.search(r"aflæst til:\s*([0-9]+,[0-9]+)", txt, re.IGNORECASE)
+    m_dt = re.search(
+        r"kl\.\s*([0-9]{1,2})\.(\d{2}),\s*d\.\s*(\d{2})\.(\d{2})\.(\d{4})",
         txt,
+        re.IGNORECASE,
     )
 
-    if m_val:
-        val = float(m_val.group(1).replace(",", "."))
+    if not m_val:
+        raise ValueError(f"Kunne ikke finde 'aflæst til' i tekst: {txt!r}")
 
-    if m_time:
-        hhmm = m_time.group(1).replace(".", ":")
-        d, m, y = m_time.group(2).split(".")
-        ts = f"{y}-{m}-{d}T{hhmm}:00"
+    reading_m3 = float(m_val.group(1).replace(",", "."))
 
-    return val, ts
+    read_at_iso = None
+    if m_dt:
+        hh, mm, dd, MM, yyyy = m_dt.group(1), m_dt.group(2), m_dt.group(3), m_dt.group(4), m_dt.group(5)
+        read_at_iso = f"{yyyy}-{MM}-{dd}T{hh.zfill(2)}:{mm}:00"
+
+    return reading_m3, read_at_iso, txt
 
 
-def scrape(email: str, password: str) -> Tuple[Optional[float], Optional[str]]:
-    log("scraper", "start", "Starting browser scrape")
-
+def scrape_once(email: str, password: str):
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
 
-        page.goto(
-            "https://www.minvandforsyning.dk/LoginIntermediate",
-            wait_until="domcontentloaded",
-        )
+        page.goto("https://www.minvandforsyning.dk/LoginIntermediate", wait_until="domcontentloaded")
         page.get_by_role("button", name="Fortsæt med Google/Microsoft/E-mail").click()
 
-        page.wait_for_url(re.compile("id.ramboll.com"))
+        page.wait_for_url(re.compile(r"^https://id\.ramboll\.com/"), timeout=60_000)
         page.fill("#signInName", email)
         page.fill("#password", password)
         page.click("#next")
 
-        page.wait_for_url(re.compile("minvandforsyning.dk"))
+        page.wait_for_url(re.compile(r"^https://www\.minvandforsyning\.dk/"), timeout=60_000)
         page.goto("https://www.minvandforsyning.dk/forbrug", wait_until="domcontentloaded")
 
         loc = page.locator("span.dynamicText").filter(has_text="aflæst til").first
-        loc.wait_for(timeout=60000)
+        loc.wait_for(timeout=60_000)
         txt = loc.inner_text()
 
         browser.close()
 
-    log("scraper", "success", f"Raw text: {txt}")
-    return parse_text(txt)
+    if not txt:
+        raise RuntimeError("Fandt ikke 'aflæst til' tekst i DOM efter login")
 
-# -----------------------------------------------------------------------------
-# Poll loop (adaptive, stable)
-# -----------------------------------------------------------------------------
+    reading_m3, read_at_iso, raw = parse_dom_text(txt)
+    scraped_at_utc = _now_utc_iso()
 
-def poll_loop():
-    global LAST_GOOD, LAST_CHANGE_TS
+    return {
+        "ok": True,
+        "error": None,
+        "reading_m3": reading_m3,
+        "read_at_iso": read_at_iso,
+        "scraped_at_utc": scraped_at_utc,
+        "raw": raw,
+    }
 
-    opts = load_options()
 
-    email = opts["email"]
-    password = opts["password"]
+def poll_loop(
+    email: str,
+    password: str,
+    idle_poll_seconds: int,
+    probe_after_minutes: int,
+    probe_poll_seconds: int,
+    probe_max_minutes: int,
+    min_poll_seconds: int,
+    jitter_seconds: int,
+):
+    global STATE
 
-    idle_poll = int(opts.get("idle_poll_seconds", 1800))
-    probe_poll = int(opts.get("probe_poll_seconds", 120))
-    probe_after = int(opts.get("probe_after_minutes", 45)) * 60
-    probe_max = int(opts.get("probe_max_minutes", 20)) * 60
-    jitter = int(opts.get("jitter_seconds", 15))
+    # Adaptive polling state
+    last_key = None  # (read_at_iso, reading_m3)
+    last_change_ts = None  # when we detected new data (epoch seconds)
+    probe_started_ts = None
+    mode = "idle"  # idle | probe
 
-    keep_last = bool(opts.get("keep_last_on_error", True))
-    allow_decrease = bool(opts.get("allow_decrease", False))
-    tol = float(opts.get("decrease_tolerance_m3", 0.0005))
+    # Error backoff (so we don't hammer on transient failures)
+    err_backoff = min_poll_seconds
 
-    probe_started = None
+    # Clamp configs to sensible bounds
+    idle_poll_seconds = _clamp_int(idle_poll_seconds, min_poll_seconds, 24 * 3600)
+    probe_poll_seconds = _clamp_int(probe_poll_seconds, min_poll_seconds, 3600)
+    probe_after_s = _clamp_int(probe_after_minutes, 1, 24 * 60) * 60
+    probe_max_s = _clamp_int(probe_max_minutes, 1, 24 * 60) * 60
+    jitter_seconds = _clamp_int(jitter_seconds, 0, 300)
 
-    log("poll", "startup", "Poll loop started")
+    print(
+        "[poll] Adaptive polling enabled. "
+        f"idle_poll_seconds={idle_poll_seconds}, "
+        f"probe_after_minutes={probe_after_minutes}, "
+        f"probe_poll_seconds={probe_poll_seconds}, "
+        f"probe_max_minutes={probe_max_minutes}, "
+        f"min_poll_seconds={min_poll_seconds}, "
+        f"jitter_seconds={jitter_seconds}"
+    )
 
     while True:
+        now = time.time()
+
         try:
-            val, read_at = scrape(email, password)
+            result = scrape_once(email, password)
+            STATE = result
+            err_backoff = min_poll_seconds
 
-            if val is not None:
-                if LAST_GOOD is None:
-                    LAST_GOOD = val
-                    LAST_CHANGE_TS = time.time()
-                    log("state", "init", f"Initial reading {val} m3")
-                else:
-                    if allow_decrease or val >= LAST_GOOD - tol:
-                        if val > LAST_GOOD:
-                            LAST_CHANGE_TS = time.time()
-                            log("state", "update", f"New reading {val} m3")
-                        LAST_GOOD = max(LAST_GOOD, val)
-
-                STATE.update(
-                    {
-                        "ok": True,
-                        "reading_m3": LAST_GOOD,
-                        "read_at_iso": read_at,
-                        "scraped_at_utc": utc_now(),
-                        "error": None,
-                    }
-                )
+            key = (result.get("read_at_iso"), result.get("reading_m3"))
+            if key != last_key and result.get("ok"):
+                last_key = key
+                last_change_ts = now
+                mode = "idle"
+                probe_started_ts = None
+                print(f"[poll] New data detected: {key}")
 
         except Exception as e:
-            log("scraper", "error", str(e))
-            STATE["error"] = str(e)
-            STATE["scraped_at_utc"] = utc_now()
-            if not keep_last:
-                STATE["ok"] = False
+            STATE = {
+                "ok": False,
+                "error": str(e),
+                "reading_m3": None,
+                "read_at_iso": None,
+                "scraped_at_utc": _now_utc_iso(),
+                "raw": None,
+            }
+            print(f"[poll] Scrape failed: {e}")
 
-        now = time.time()
-        in_probe = LAST_CHANGE_TS and (now - LAST_CHANGE_TS) > probe_after
+            # Backoff on errors, up to idle_poll_seconds
+            err_backoff = min(err_backoff * 2, idle_poll_seconds)
+            _sleep_with_jitter(err_backoff, jitter_seconds)
+            continue
 
-        if in_probe:
-            if probe_started is None:
-                probe_started = now
-                log("poll", "probe", "Entering probe mode")
-            if (now - probe_started) > probe_max:
-                in_probe = False
-                probe_started = None
-                log("poll", "idle", "Leaving probe mode")
+        # Decide next sleep interval
+        if last_change_ts is None:
+            # We have not seen a successful value change yet.
+            sleep_s = max(min_poll_seconds, min(idle_poll_seconds, 300))
+        else:
+            age = now - last_change_ts
 
-        base = probe_poll if in_probe else idle_poll
-        sleep_for = base + random.randint(0, jitter)
-        log("poll", "sleep", f"Sleeping {sleep_for}s")
-        time.sleep(max(10, sleep_for))
+            if mode == "idle":
+                if age >= probe_after_s:
+                    mode = "probe"
+                    probe_started_ts = now
+                    sleep_s = probe_poll_seconds
+                    print("[poll] Entering probe mode")
+                else:
+                    sleep_s = idle_poll_seconds
 
-# -----------------------------------------------------------------------------
-# API
-# -----------------------------------------------------------------------------
+            else:  # probe
+                assert probe_started_ts is not None
+                if (now - probe_started_ts) >= probe_max_s:
+                    mode = "idle"
+                    probe_started_ts = None
+                    sleep_s = idle_poll_seconds
+                    print("[poll] Probe window expired, returning to idle")
+                else:
+                    sleep_s = probe_poll_seconds
+
+        sleep_s = _clamp_int(sleep_s, min_poll_seconds, 24 * 3600)
+        _sleep_with_jitter(sleep_s, jitter_seconds)
+
 
 @APP.get("/state")
 def get_state():
-    # Always 200 to keep HA stable
+    if not STATE.get("ok"):
+        raise HTTPException(status_code=503, detail=STATE)
     return STATE
+
 
 @APP.get("/state_raw")
 def get_state_raw():
     return STATE
 
-# -----------------------------------------------------------------------------
-# Entrypoint
-# -----------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    log("app", "startup", "Minvandforsyning Companion starting")
-    threading.Thread(target=poll_loop, daemon=True).start()
+    opts = load_options()
+    email = opts.get("email", "")
+    password = opts.get("password", "")
+    idle_poll_seconds = int(opts.get("idle_poll_seconds", 1800))
+    probe_after_minutes = int(opts.get("probe_after_minutes", 45))
+    probe_poll_seconds = int(opts.get("probe_poll_seconds", 120))
+    probe_max_minutes = int(opts.get("probe_max_minutes", 20))
+    min_poll_seconds = int(opts.get("min_poll_seconds", 30))
+    jitter_seconds = int(opts.get("jitter_seconds", 15))
+
+    if not email or not password:
+        raise RuntimeError("Du skal udfylde email og password i add-on options")
+
+    t = threading.Thread(
+        target=poll_loop,
+        args=(
+            email,
+            password,
+            idle_poll_seconds,
+            probe_after_minutes,
+            probe_poll_seconds,
+            probe_max_minutes,
+            min_poll_seconds,
+            jitter_seconds,
+        ),
+        daemon=True,
+    )
+    t.start()
 
     import uvicorn
-
-    port = int(load_options().get("port", 8080))
-    uvicorn.run(APP, host="0.0.0.0", port=port)
+    uvicorn.run(APP, host="0.0.0.0", port=8080)

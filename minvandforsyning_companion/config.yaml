@@ -1,7 +1,7 @@
 name: "Minvandforsyning Companion"
-version: "0.2.8"
+version: "0.2.9"
 slug: "minvandforsyning_companion"
-description: "Scraper minvandforsyning.dk via Playwright og udstiller JSON til Home Assistant (stabil cache + adaptiv polling)"
+description: "Logger ind på minvandforsyning.dk og udstiller seneste aflæsning via HTTP til Home Assistant"
 arch:
   - amd64
   - aarch64
@@ -9,17 +9,14 @@ arch:
 startup: services
 boot: auto
 init: false
-
-# Direct access (no ingress)
+ingress: false
+panel_icon: mdi:water
 ports:
   8080/tcp: 8080
 
 options:
-  # Login
   email: ""
   password: ""
-
-  # Polling (adaptive)
   idle_poll_seconds: 1800
   probe_after_minutes: 45
   probe_poll_seconds: 120
@@ -27,25 +24,14 @@ options:
   min_poll_seconds: 30
   jitter_seconds: 15
 
-  # Stability
-  keep_last_on_error: true
-  allow_decrease: false
-  decrease_tolerance_m3: 0.0005
-
 schema:
-  # Login
   email: str
   password: password
+  idle_poll_seconds: int
+  probe_after_minutes: int
+  probe_poll_seconds: int
+  probe_max_minutes: int
+  min_poll_seconds: int
+  jitter_seconds: int
 
-  # Polling (adaptive) - valid int(min,max) syntax
-  idle_poll_seconds: int(30,86400)     # 30s .. 24h
-  probe_after_minutes: int(1,1440)     # 1m .. 24h
-  probe_poll_seconds: int(30,3600)     # 30s .. 1h
-  probe_max_minutes: int(1,240)        # 1m .. 4h
-  min_poll_seconds: int(10,3600)       # 10s .. 1h
-  jitter_seconds: int(0,300)           # 0s .. 5m
-
-  # Stability
-  keep_last_on_error: bool
-  allow_decrease: bool
-  decrease_tolerance_m3: float
+# Translations are in translations/da.yaml and translations/en.yaml
